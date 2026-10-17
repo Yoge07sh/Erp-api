@@ -32,6 +32,22 @@ router.get("/attendance/dashboard", authMiddleware, AttendanceController.getAtte
 router.get("/my/attendance", authMiddleware, (req, res) => {
   AttendanceController.getMyAttendance(req, res);
 });
+router.get(
+  "/e-attendance/mappings",
+  authMiddleware,
+  AttendanceController.getEAttendanceMappings,
+);
 
+router.get(
+  "/e-attendance/students",
+  authMiddleware,
+  AttendanceController.getEAttendanceStudents,
+);
+
+router.get(
+  "/e-attendance/records",
+  authMiddleware,
+  AttendanceController.getEAttendanceRecords,
+);
 
 module.exports = router;

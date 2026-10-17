@@ -743,6 +743,187 @@ const getMyAttendance = async (req, res) => {
   }
 };
 
+const getEAttendanceMappings = async (req, res) => {
+  try {
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+    });
+
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: "Faculty profile not found",
+      });
+    }
+
+    const mappings = await FacultyMap.find({
+      facultyId: faculty._id,
+    })
+      .populate("course", "courseShortName")
+      .populate("branch", "branchShortName")
+      .populate("subjectId", "subjectFullName");
+
+    return res.status(200).json({
+      success: true,
+      data: mappings,
+    });
+  } catch (error) {
+    console.error("E-Attendance mappings error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch mappings",
+    });
+  }
+};
+
+const getEAttendanceStudents = async (req, res) => {
+  try {
+    const { mappingId } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(mappingId || "")) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid mapping ID is required",
+      });
+    }
+
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+    });
+
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: "Faculty profile not found",
+      });
+    }
+
+    const mapping = await FacultyMap.findOne({
+      _id: mappingId,
+      facultyId: faculty._id,
+    });
+
+    if (!mapping) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this class",
+      });
+    }
+
+    const students = await Student.find({
+      currentSession: mapping.session,
+      course: mapping.course,
+      branch: mapping.branch,
+      year: mapping.year,
+      semester: mapping.semester,
+      section: mapping.section,
+      status: "Active",
+    })
+      .select("_id rollNumber firstName lastName")
+      .sort({ rollNumber: 1 });
+
+    return res.status(200).json({
+      success: true,
+      data: students,
+    });
+  } catch (error) {
+    console.error("E-Attendance students error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch students",
+    });
+  }
+};
+
+const getEAttendanceRecords = async (req, res) => {
+  try {
+    const { mappingId, fromDate, toDate } = req.query;
+
+    if (
+      !mongoose.Types.ObjectId.isValid(mappingId || "") ||
+      !fromDate ||
+      !toDate
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Mapping ID, start date and end date are required",
+      });
+    }
+
+    if (!isValidDateString(fromDate) || !isValidDateString(toDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Dates must use YYYY-MM-DD format",
+      });
+    }
+
+    if (fromDate > toDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date cannot be after end date",
+      });
+    }
+
+    const faculty = await Faculty.findOne({
+      userId: req.user._id,
+    });
+
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: "Faculty profile not found",
+      });
+    }
+
+    const mapping = await FacultyMap.findOne({
+      _id: mappingId,
+      facultyId: faculty._id,
+    });
+
+    if (!mapping) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this class",
+      });
+    }
+
+    const startDate = new Date(`${fromDate}T00:00:00.000+05:30`);
+    const endDate = new Date(`${toDate}T23:59:59.999+05:30`);
+
+    const records = await Attendance.find({
+      facultyMapId: mapping._id,
+      date: {
+        $gte: startDate,
+        $lte: endDate,
+      },
+    })
+      .populate("timeSlotId", "lectureNo timeSlot")
+      .populate("students.studentId", "rollNumber firstName lastName")
+      .sort({ date: 1 });
+
+    records.sort((a, b) => {
+      const dateDifference = new Date(a.date) - new Date(b.date);
+
+      if (dateDifference !== 0) return dateDifference;
+
+      return (
+        (a.timeSlotId?.lectureNo ?? 999) - (b.timeSlotId?.lectureNo ?? 999)
+      );
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: records,
+    });
+  } catch (error) {
+    console.error("E-Attendance records error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch E-Attendance records",
+    });
+  }
+};
+
 module.exports = {
   getStudentsData,
   getFacultyMappings,
@@ -751,5 +932,8 @@ module.exports = {
   updateAttendance,
   getEregister,
   getAttendanceDashboard,
-  getMyAttendance
+  getMyAttendance,
+  getEAttendanceMappings,
+  getEAttendanceStudents,
+  getEAttendanceRecords,
 };
