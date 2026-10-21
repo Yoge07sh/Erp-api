@@ -331,15 +331,15 @@ const bulkUploadStudents = async (req, res) => {
     // Read CSV / Excel file
     const workbook = xlsx.read(req.file.buffer, {
       type: "buffer",
+      raw: true,
     });
-
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
     const rows = xlsx.utils.sheet_to_json(sheet, {
       defval: "",
+      raw: false,
     });
-
     console.log("Total rows:", rows.length);
     console.log("First row:", rows[0]);
 

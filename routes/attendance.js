@@ -50,4 +50,9 @@ router.get(
   AttendanceController.getEAttendanceRecords,
 );
 
+router.get(
+  "/api/attendance/totalattendance-register",
+  authMiddleware,
+  AttendanceController.getTotalAttendanceRegister,
+);
 module.exports = router;
