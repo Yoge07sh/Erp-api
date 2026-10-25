@@ -70,26 +70,46 @@ async function addBranch(req, res) {
   }
 }
 
+
 async function getBranches(req, res) {
   try {
     const page = parseInt(req.query.pageNo) || 1;
     const limit = parseInt(req.query.limit) || 5;
-
     const skip = (page - 1) * limit;
 
-    const searchTerm = req.query.branchFullName || "";
+    const {
+      branchFullName,
+      branchCode,
+      branchShortName,
+    } = req.query;
 
-    const filter = {
-      branchFullName: {
-        $regex: new RegExp(searchTerm, "i"),
-      },
-    };
+    // Build filter dynamically
+    const filter = {};
 
-    // Total branches matching search
+    if (branchFullName) {
+      filter.branchFullName = {
+        $regex: branchFullName,
+        $options: "i",
+      };
+    } else if (branchCode) {
+      filter.branchCode = {
+        $regex: branchCode,
+        $options: "i",
+      };
+    } else if (branchShortName) {
+      filter.branchShortName = {
+        $regex: branchShortName,
+        $options: "i",
+      };
+    }
+
+    // Count matching branches
     const totalBranches = await Branch.countDocuments(filter);
 
-    // Current page branches
-    const branches = await Branch.find(filter).skip(skip).limit(limit);
+    // Fetch branches with pagination
+    const branches = await Branch.find(filter)
+      .skip(skip)
+      .limit(limit);
 
     const totalPages = Math.ceil(totalBranches / limit);
 
@@ -112,6 +132,7 @@ async function getBranches(req, res) {
     });
   }
 }
+
 async function deleteBranch(req, res) {
   try {
     const user = await User.findById(req.user._id);

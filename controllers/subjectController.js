@@ -31,20 +31,52 @@ async function addSubject(req, res) {
 
 async function getSubjects(req, res) {
   try {
-    const page = parseInt(req.query.pageNo) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const page = Math.max(1, parseInt(req.query.pageNo, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 5);
     const skip = (page - 1) * limit;
 
-    const searchTerm = req.query.subjectFullName || "";
+    const {
+      subjectFullName,
+      subjectCode,
+      subjectNickName,
+      subjectCategory,
+      subjectType,
+    } = req.query;
 
-    const filter = {
-      subjectFullName: {
-        $regex: new RegExp(searchTerm, "i"),
-      },
-    };
+    // Build filter dynamically
+    const filter = {};
 
+    if (subjectFullName) {
+      filter.subjectFullName = {
+        $regex: subjectFullName,
+        $options: "i",
+      };
+    } else if (subjectCode) {
+      filter.subjectCode = {
+        $regex: subjectCode,
+        $options: "i",
+      };
+    } else if (subjectNickName) {
+      filter.subjectNickName = {
+        $regex: subjectNickName,
+        $options: "i",
+      };
+    } else if (subjectCategory) {
+      filter.subjectCategory = {
+        $regex: subjectCategory,
+        $options: "i",
+      };
+    } else if (subjectType) {
+      filter.subjectType = {
+        $regex: subjectType,
+        $options: "i",
+      };
+    }
+
+    // Count matching subjects
     const totalSubjects = await Subject.countDocuments(filter);
 
+    // Fetch subjects with sorting and pagination
     const subjects = await Subject.find(filter, {
       _id: 1,
       subjectFullName: 1,

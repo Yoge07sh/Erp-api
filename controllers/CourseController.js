@@ -45,16 +45,32 @@ async function getCourses(req, res) {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
 
-    const searchTerm = req.query.courseFullName || "";
+    const { courseFullName, courseCode, courseShortName } = req.query;
 
-    const filter = {
-      courseFullName: {
-        $regex: new RegExp(searchTerm, "i"),
-      },
-    };
+    // Build filter dynamically
+    const filter = {};
 
+    if (courseFullName) {
+      filter.courseFullName = {
+        $regex: courseFullName,
+        $options: "i",
+      };
+    } else if (courseCode) {
+      filter.courseCode = {
+        $regex: courseCode,
+        $options: "i",
+      };
+    } else if (courseShortName) {
+      filter.courseShortName = {
+        $regex: courseShortName,
+        $options: "i",
+      };
+    }
+
+    // Count matching courses
     const totalCourses = await Course.countDocuments(filter);
 
+    // Fetch filtered courses with pagination
     const courses = await Course.find(filter).skip(skip).limit(limit);
 
     const totalPages = Math.ceil(totalCourses / limit);

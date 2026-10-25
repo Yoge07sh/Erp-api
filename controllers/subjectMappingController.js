@@ -153,36 +153,108 @@ async function addSubjectMapping(req, res) {
 
 async function getSubjectsMapped(req, res) {
   try {
-    const page = parseInt(req.query.pageNo) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const page = Math.max(1, parseInt(req.query.pageNo) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 5);
     const skip = (page - 1) * limit;
 
-    const searchTerm = req.query.course || "";
+    const { filterBy, search } = req.query;
 
     let filter = {};
 
-    // Search course by name
-    if (searchTerm.trim() !== "") {
-      const matchingCourses = await Course.find({
-        $or: [
-          {
-            courseFullName: {
-              $regex: searchTerm.trim(),
-              $options: "i",
-            },
-          },
-          {
-            courseShortName: {
-              $regex: searchTerm.trim(),
-              $options: "i",
-            },
-          },
-        ],
-      }).select("_id");
+    if (search && search.trim() !== "") {
+      const searchTerm = search.trim();
 
-      const courseIds = matchingCourses.map((course) => course._id);
+      switch (filterBy) {
+        case "course": {
+          const matchingCourses = await Course.find({
+            $or: [
+              {
+                courseFullName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+              {
+                courseShortName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+            ],
+          }).select("_id");
 
-      filter.course = { $in: courseIds };
+          filter.course = {
+            $in: matchingCourses.map((course) => course._id),
+          };
+          break;
+        }
+
+        case "branch": {
+          const matchingBranches = await Branch.find({
+            $or: [
+              {
+                branchFullName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+              {
+                branchShortName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+            ],
+          }).select("_id");
+
+          filter.branch = {
+            $in: matchingBranches.map((branch) => branch._id),
+          };
+          break;
+        }
+
+        case "subject": {
+          const matchingSubjects = await Subject.find({
+            $or: [
+              {
+                subjectFullName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+              {
+                subjectNickName: {
+                  $regex: searchTerm,
+                  $options: "i",
+                },
+              },
+            ],
+          }).select("_id");
+
+          filter.subject = {
+            $in: matchingSubjects.map((subject) => subject._id),
+          };
+          break;
+        }
+
+        case "session":
+          filter.session = {
+            $regex: searchTerm,
+            $options: "i",
+          };
+          break;
+
+        case "year":
+          filter.year = isNaN(Number(searchTerm)) ? -1 : Number(searchTerm);
+          break;
+
+        case "semester":
+          filter.semester = isNaN(Number(searchTerm)) ? -1 : Number(searchTerm);
+          break;
+
+        default:
+          break;
+      }
     }
 
     const totalSubjectsMapped = await Mapping.countDocuments(filter);
@@ -202,20 +274,21 @@ async function getSubjectsMapped(req, res) {
       data: subjectsmap,
       pagination: {
         currentPage: page,
-        limit: limit,
+        limit,
         totalRecords: totalSubjectsMapped,
-        totalPages: totalPages,
+        totalPages,
       },
     });
   } catch (error) {
-    console.log(error);
+    console.error("Error fetching subject mappings:", error);
 
     res.status(500).send({
       success: false,
-      message: "Something went wrong..!",
+      message: "Something went wrong!",
     });
   }
 }
+
 const getSubjectMappingById = async (req, res) => {
   try {
     let id = req.params.id;

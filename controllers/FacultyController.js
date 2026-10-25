@@ -143,21 +143,34 @@ async function addFaculties(req, res) {
 
 async function getFaculties(req, res) {
   try {
-    const page = parseInt(req.query.pageNo) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const page = Math.max(1, parseInt(req.query.pageNo) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 5);
     const skip = (page - 1) * limit;
 
-    const searchTerm = req.query.firstName || "";
+    const { filterBy = "firstName", search = "" } = req.query;
 
-    const filter = {
-      firstName: {
-        $regex: new RegExp(searchTerm, "i"),
-      },
-    };
+    const allowedFilters = [
+      "firstName",
+      "lastName",
+      "designation",
+      "highestQualification",
+    ];
+
+    const filter = {};
+
+    if (search.trim() !== "" && allowedFilters.includes(filterBy)) {
+      filter[filterBy] = {
+        $regex: search.trim(),
+        $options: "i",
+      };
+    }
 
     const totalFaculty = await Faculty.countDocuments(filter);
 
-    const faculties = await Faculty.find(filter).skip(skip).limit(limit);
+    const faculties = await Faculty.find(filter)
+      .sort({ firstName: 1 })
+      .skip(skip)
+      .limit(limit);
 
     const totalPages = Math.ceil(totalFaculty / limit);
 
@@ -166,17 +179,17 @@ async function getFaculties(req, res) {
       data: faculties,
       pagination: {
         currentPage: page,
-        limit: limit,
+        limit,
         totalRecords: totalFaculty,
-        totalPages: totalPages,
+        totalPages,
       },
     });
   } catch (error) {
-    console.log(error);
+    console.error("Error fetching faculties:", error);
 
     res.status(500).send({
       success: false,
-      message: "Something went wrong..!",
+      message: "Something went wrong!",
     });
   }
 }

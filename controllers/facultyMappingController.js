@@ -179,67 +179,33 @@ const addFacultyMapping = async (req, res) => {
 
 const getFacultyList = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 5);
     const skip = (page - 1) * limit;
 
-    const session = req.query.session || "";
-    const facultyName = req.query.facultyName || "";
+    const { filterBy = "session", search = "" } = req.query;
+    const searchTerm = search.trim();
 
-    let searchCondition = {};
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    if (session.trim() !== "") {
-      searchCondition.session = {
-        $regex: session.trim(),
-        $options: "i",
-      };
-    }
+    const regex = {
+      $regex: escapeRegex(searchTerm),
+      $options: "i",
+    };
 
-    if (facultyName.trim() !== "") {
-      searchCondition.$or = [
-        {
-          "facultyId.firstName": {
-            $regex: facultyName.trim(),
-            $options: "i",
-          },
-        },
-        {
-          "facultyId.lastName": {
-            $regex: facultyName.trim(),
-            $options: "i",
-          },
-        },
-      ];
-    }
+    const allowedFilters = [
+      "session",
+      "facultyName",
+      "course",
+      "branch",
+      "subject",
+      "year",
+      "semester",
+      "section",
+    ];
 
-    // Count filtered records
-    const totalRecords = await FacultyMap.aggregate([
-      {
-        $lookup: {
-          from: "faculties",
-          localField: "facultyId",
-          foreignField: "_id",
-          as: "facultyId",
-        },
-      },
-      {
-        $unwind: {
-          path: "$facultyId",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $match: searchCondition,
-      },
-      {
-        $count: "total",
-      },
-    ]);
-
-    const total = totalRecords.length > 0 ? totalRecords[0].total : 0;
-
-    // Get paginated data
-    const facultyMapping = await FacultyMap.aggregate([
+    // Common lookup stages
+    const lookupStages = [
       {
         $lookup: {
           from: "faculties",
@@ -296,41 +262,114 @@ const getFacultyList = async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
-      {
-        $match: searchCondition,
-      },
+    ];
+
+    let matchCondition = {};
+
+    if (searchTerm && allowedFilters.includes(filterBy)) {
+      switch (filterBy) {
+        case "session":
+          matchCondition.session = regex;
+          break;
+
+        case "facultyName":
+          matchCondition.$or = [
+            { "facultyId.firstName": regex },
+            { "facultyId.lastName": regex },
+          ];
+          break;
+
+        case "course":
+          matchCondition.$or = [
+            { "course.courseFullName": regex },
+            { "course.courseShortName": regex },
+          ];
+          break;
+
+        case "branch":
+          matchCondition.$or = [
+            { "branch.branchFullName": regex },
+            { "branch.branchShortName": regex },
+          ];
+          break;
+
+        case "subject":
+          matchCondition.$or = [
+            { "subjectId.subjectFullName": regex },
+            { "subjectId.subjectNickName": regex },
+          ];
+          break;
+
+        case "section":
+          matchCondition.section = regex;
+          break;
+
+        case "year":
+        case "semester": {
+          const numericValue = Number(searchTerm);
+
+          // Only allow valid numeric searches for these fields.
+          if (searchTerm !== "" && Number.isFinite(numericValue)) {
+            matchCondition[filterBy] = numericValue;
+          } else {
+            // No documents can match this impossible condition.
+            matchCondition[filterBy] = { $exists: false };
+          }
+          break;
+        }
+      }
+    } else if (searchTerm && !allowedFilters.includes(filterBy)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid filter field.",
+      });
+    }
+
+    const pipeline = [
+      ...lookupStages,
+      ...(Object.keys(matchCondition).length
+        ? [{ $match: matchCondition }]
+        : []),
+    ];
+
+    // Count filtered records
+    const countResult = await FacultyMap.aggregate([
+      ...pipeline,
+      { $count: "total" },
+    ]);
+
+    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Get filtered and paginated records
+    const facultyMapping = await FacultyMap.aggregate([
+      ...pipeline,
       {
         $sort: {
           "facultyId.firstName": 1,
         },
       },
-      {
-        $skip: skip,
-      },
-      {
-        $limit: limit,
-      },
+      { $skip: skip },
+      { $limit: limit },
     ]);
 
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(totalRecords / limit);
 
-    res.status(200).send({
+    return res.status(200).send({
       success: true,
       data: facultyMapping,
       pagination: {
         currentPage: page,
-        limit: limit,
-        totalRecords: total,
-        totalPages: totalPages,
+        limit,
+        totalRecords,
+        totalPages,
       },
     });
   } catch (err) {
     console.error("Error fetching faculty mapping:", err);
 
-    res.status(500).send({
+    return res.status(500).send({
       success: false,
       message: "Failed to get faculty mapping.",
-      error: err.message,
     });
   }
 };

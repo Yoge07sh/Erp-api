@@ -149,49 +149,134 @@ async function addStudent(req, res) {
 
 async function getStudents(req, res) {
   try {
-    const searchTerm = req.query.courseFullName || "";
-
-    // Pagination
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
     const skip = (page - 1) * limit;
 
-    const filter = {
-      $or: [
-        { firstName: { $regex: new RegExp(searchTerm, "i") } },
-        { lastName: { $regex: new RegExp(searchTerm, "i") } },
-        { enrollmentNumber: { $regex: new RegExp(searchTerm, "i") } },
-        { fileNumber: { $regex: new RegExp(searchTerm, "i") } },
-        { rollNumber: { $regex: new RegExp(searchTerm, "i") } },
-      ],
+    const { filterBy = "firstName", search = "" } = req.query;
+
+    const searchTerm = search.trim();
+
+    const allowedFilters = [
+      "firstName",
+      "lastName",
+      "enrollmentNumber",
+      "rollNumber",
+      "fileNumber",
+      "course",
+      "branch",
+      "year",
+    ];
+
+    if (!allowedFilters.includes(filterBy)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid filter field.",
+      });
+    }
+
+    // Escape special regex characters
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const regex = {
+      $regex: escapeRegex(searchTerm),
+      $options: "i",
     };
 
-    // Total matching students
-    const totalRecords = await Student.countDocuments(filter);
+    let matchCondition = {};
 
-    // Students for current page
-    const student = await Student.find(filter).skip(skip).limit(limit);
+    if (searchTerm) {
+      switch (filterBy) {
+        case "course":
+          matchCondition.$or = [
+            { "_course.courseFullName": regex },
+            { "_course.courseShortName": regex },
+          ];
+          break;
 
-    // Total number of pages
-    const totalPages = Math.ceil(totalRecords / limit);
+        case "branch":
+          matchCondition.$or = [
+            { "_branch.branchFullName": regex },
+            { "_branch.branchShortName": regex },
+          ];
+          break;
 
-    res.status(200).send({
+        case "year":
+          matchCondition.year = regex;
+          break;
+
+        default:
+          matchCondition[filterBy] = regex;
+          break;
+      }
+    }
+
+    // Join Course and Branch collections
+    const pipeline = [
+      {
+        $lookup: {
+          from: "courses",
+          localField: "course",
+          foreignField: "_id",
+          as: "_course",
+        },
+      },
+      {
+        $lookup: {
+          from: "branches",
+          localField: "branch",
+          foreignField: "_id",
+          as: "_branch",
+        },
+      },
+      ...(Object.keys(matchCondition).length > 0
+        ? [{ $match: matchCondition }]
+        : []),
+    ];
+
+    // Count matching students
+    const countResult = await Student.aggregate([
+      ...pipeline,
+      { $count: "total" },
+    ]);
+
+    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Fetch paginated students
+    const students = await Student.aggregate([
+      ...pipeline,
+      {
+        $sort: {
+          firstName: 1,
+          lastName: 1,
+        },
+      },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $project: {
+          _course: 0,
+          _branch: 0,
+        },
+      },
+    ]);
+
+    return res.status(200).send({
       success: true,
-      data: student,
+      data: students,
       pagination: {
         currentPage: page,
-        limit: limit,
-        totalRecords: totalRecords,
-        totalPages: totalPages,
+        limit,
+        totalRecords,
+        totalPages: Math.ceil(totalRecords / limit),
       },
     });
   } catch (error) {
-    console.log(error);
+    console.error("Error fetching students:", error);
 
-    res.status(500).send({
+    return res.status(500).send({
       success: false,
-      message: "Something went wrong..!",
+      message: "Something went wrong!",
     });
   }
 }
