@@ -1,34 +1,41 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
-const facultySchema = new Schema({
+const facultySchema = new Schema(
+  {
     userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-        unique: true
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
     },
-    collegeId: { type: String, unique: true, required: true, uppercase: true, trim: true },
-    thumbId: { type: String, required: true },
+    collegeId: { type: String, uppercase: true, trim: true },
+    thumbId: { type: String },
     firstName: { type: String, required: true },
-    lastName: { type: String, },
+    lastName: { type: String },
     collegeEmail: { type: String, required: true },
-    personalEmail: { type: String, required: true },
-    mobileNo: { type: Number, required: true },
-    emergencyMobileNo: { type: Number, required: true },
-    fatherName: { type: String, required: true },
-    motherName: { type: String, required: true },
-    gender: { type: String, default: 'male', enum: ['male', 'female'] },
-    dob: { type: Date, required: true },
-    highestQualification: { type: String, required: true },
-    designation: { type: String, required: true },
-    marriedStatus: { type: String, default: 'not married', enum: ['not married', 'married'] },
-    totalExperience: { type: String, required: true },
-    teachingExperience: { type: Number, required: true },
-    industryExperience: { type: Number, required: true },
-    researchExperience: { type: Number, required: true },
+    personalEmail: { type: String },
+    mobileNo: { type: Number },
+    emergencyMobileNo: { type: Number },
+    fatherName: { type: String },
+    motherName: { type: String },
+    gender: { type: String, default: "male", enum: ["male", "female"] },
+    dob: { type: Date },
+    highestQualification: { type: String },
+    designation: { type: String },
+    marriedStatus: {
+      type: String,
+      default: "not married",
+      enum: ["not married", "married"],
+    },
+    totalExperience: { type: String },
+    teachingExperience: { type: Number },
+    industryExperience: { type: Number },
+    researchExperience: { type: Number },
     facultyImage: { type: String, required: false },
-    status: { type: String, default: 'active', enum: ['active', 'inactive'] },
-}, { timestamps: true })
+    status: { type: String, default: "active", enum: ["active", "inactive"] },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model('faculty', facultySchema)
+module.exports = mongoose.model("faculty", facultySchema);

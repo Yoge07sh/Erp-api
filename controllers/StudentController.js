@@ -147,118 +147,50 @@ async function addStudent(req, res) {
   }
 }
 
+// Make sure Student is imported the same way as in your current controller file.
+// const Student = require("../models/Student");
+
 async function getStudents(req, res) {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
     const skip = (page - 1) * limit;
 
-    const { filterBy = "firstName", search = "" } = req.query;
+    const { courseId, branchId, year, semester, section, currentSession } =
+      req.query;
 
-    const searchTerm = search.trim();
+    const query = {};
 
-    const allowedFilters = [
-      "firstName",
-      "lastName",
-      "enrollmentNumber",
-      "rollNumber",
-      "fileNumber",
-      "course",
-      "branch",
-      "year",
-    ];
+    // course / branch are stored as ObjectIds; Student.find casts the strings for us
+    if (courseId) query.course = courseId;
+    if (branchId) query.branch = branchId;
 
-    if (!allowedFilters.includes(filterBy)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid filter field.",
-      });
-    }
+    // year / semester may be stored as a Number or a String, so match both
+    if (year) query.year = { $in: [String(year), Number(year)] };
+    if (semester) query.semester = { $in: [String(semester), Number(semester)] };
 
-    // Escape special regex characters
-    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (currentSession) query.currentSession = String(currentSession).trim();
 
-    const regex = {
-      $regex: escapeRegex(searchTerm),
-      $options: "i",
-    };
+    if (section) {
+      const cleanSection = String(section).trim().toUpperCase();
 
-    let matchCondition = {};
-
-    if (searchTerm) {
-      switch (filterBy) {
-        case "course":
-          matchCondition.$or = [
-            { "_course.courseFullName": regex },
-            { "_course.courseShortName": regex },
-          ];
-          break;
-
-        case "branch":
-          matchCondition.$or = [
-            { "_branch.branchFullName": regex },
-            { "_branch.branchShortName": regex },
-          ];
-          break;
-
-        case "year":
-          matchCondition.year = regex;
-          break;
-
-        default:
-          matchCondition[filterBy] = regex;
-          break;
+      if (!["A", "B", "C", "D"].includes(cleanSection)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid section.",
+        });
       }
+
+      query.section = cleanSection;
     }
 
-    // Join Course and Branch collections
-    const pipeline = [
-      {
-        $lookup: {
-          from: "courses",
-          localField: "course",
-          foreignField: "_id",
-          as: "_course",
-        },
-      },
-      {
-        $lookup: {
-          from: "branches",
-          localField: "branch",
-          foreignField: "_id",
-          as: "_branch",
-        },
-      },
-      ...(Object.keys(matchCondition).length > 0
-        ? [{ $match: matchCondition }]
-        : []),
-    ];
-
-    // Count matching students
-    const countResult = await Student.aggregate([
-      ...pipeline,
-      { $count: "total" },
-    ]);
-
-    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
-
-    // Fetch paginated students
-    const students = await Student.aggregate([
-      ...pipeline,
-      {
-        $sort: {
-          firstName: 1,
-          lastName: 1,
-        },
-      },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $project: {
-          _course: 0,
-          _branch: 0,
-        },
-      },
+    const [totalRecords, students] = await Promise.all([
+      Student.countDocuments(query),
+      Student.find(query)
+        .sort({ firstName: 1, lastName: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
     ]);
 
     return res.status(200).send({
@@ -272,6 +204,14 @@ async function getStudents(req, res) {
       },
     });
   } catch (error) {
+    // Invalid ObjectId in courseId / branchId
+    if (error.name === "CastError") {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid course or branch id.",
+      });
+    }
+
     console.error("Error fetching students:", error);
 
     return res.status(500).send({
@@ -280,6 +220,7 @@ async function getStudents(req, res) {
     });
   }
 }
+
 
 async function deleteStudent(req, res) {
   try {

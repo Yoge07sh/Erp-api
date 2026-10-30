@@ -8,8 +8,6 @@ async function addFaculty(req, res) {
   try {
     let upload;
 
-    console.log(req.body);
-    console.log(req.file);
 
     // Upload faculty image
     if (req.file) {
