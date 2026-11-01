@@ -20,7 +20,6 @@ async function addSubject(req, res) {
     let subject = new Subject(req.body);
 
     await subject.save();
-    console.log("data saved sucessfully....");
 
     res.status(200).send({ success: true, message: "data saved successfully" });
   } catch (error) {
