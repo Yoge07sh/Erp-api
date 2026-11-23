@@ -13,10 +13,11 @@ const placementSchema = new mongoose.Schema(
       trim: true,
     },
 
-    address: {
-      type: String,
-      required: true,
-    },
+    addressLine1: { type: String, trim: true },
+    addressLine2: { type: String, trim: true },
+    City: { type: String, trim: true },
+    State: { type: String, trim: true },
+    Pincode: { type: String, trim: true },
 
     hrName: {
       type: String,
