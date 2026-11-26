@@ -4,6 +4,7 @@ const multer = require("multer");
 const bodyParser = require("body-parser");
 const StudentController = require("../controllers/StudentController");
 const authMiddleware = require("../middleware/authMiddleware");
+
 router.use(bodyParser.json());
 router.use(bodyParser.urlencoded({ extended: false }));
 
@@ -43,5 +44,9 @@ router.get("/student/:id", (req, res) =>
 router.put("/edit/student/:id", upload.single("studentImage"), (req, res) => {
   StudentController.editStudent(req, res);
 });
+
+router.get("/students/export", authMiddleware, (req, res) =>
+  StudentController.exportStudents(req, res),
+);
 
 module.exports = router;

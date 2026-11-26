@@ -5,7 +5,7 @@ const Student = require("../models/Student");
 const User = require("../models/User");
 const cloudinary = require("cloudinary").v2;
 const { randomUUID } = require("crypto");
-
+const { format } = require("@fast-csv/format");
 const bcrypt = require("bcrypt");
 
 const xlsx = require("xlsx");
@@ -149,39 +149,74 @@ async function addStudent(req, res) {
   }
 }
 
+function buildStudentFilter(query) {
+  const {
+    courseId,
+    branchId,
+    year,
+    semester,
+    section,
+    currentSession,
+    rollNumber,
+    gender,
+    category,
+  } = query;
+
+  const filter = {};
+
+  if (courseId) filter.course = courseId;
+  if (branchId) filter.branch = branchId;
+
+  if (year) filter.year = { $in: [String(year), Number(year)] };
+  if (semester) filter.semester = { $in: [String(semester), Number(semester)] };
+
+  if (currentSession) {
+    filter.currentSession = String(currentSession).trim();
+  }
+
+  if (section) {
+    const cleanSection = String(section).trim().toUpperCase();
+
+    if (!["A", "B", "C", "D"].includes(cleanSection)) {
+      const err = new Error("Invalid section.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    filter.section = cleanSection;
+  }
+
+  // Roll Number
+  if (rollNumber && String(rollNumber).trim()) {
+    filter.rollNumber = String(rollNumber).trim();
+  }
+
+  // Gender
+  if (gender) {
+    filter.gender = String(gender).trim();
+  }
+
+  // Category
+  if (category) {
+    filter.category = String(category).trim();
+  }
+
+  return filter;
+}
+
 async function getStudents(req, res) {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
     const skip = (page - 1) * limit;
 
-    const { courseId, branchId, year, semester, section, currentSession } =
-      req.query;
-
-    const query = {};
-
-    // course / branch are stored as ObjectIds; Student.find casts the strings for us
-    if (courseId) query.course = courseId;
-    if (branchId) query.branch = branchId;
-
-    // year / semester may be stored as a Number or a String, so match both
-    if (year) query.year = { $in: [String(year), Number(year)] };
-    if (semester)
-      query.semester = { $in: [String(semester), Number(semester)] };
-
-    if (currentSession) query.currentSession = String(currentSession).trim();
-
-    if (section) {
-      const cleanSection = String(section).trim().toUpperCase();
-
-      if (!["A", "B", "C", "D"].includes(cleanSection)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid section.",
-        });
-      }
-
-      query.section = cleanSection;
+    let query;
+    try {
+      query = buildStudentFilter(req.query);
+    } catch (e) {
+      return res
+        .status(e.statusCode || 400)
+        .send({ success: false, message: e.message });
     }
 
     const [totalRecords, students] = await Promise.all([
@@ -259,18 +294,35 @@ async function deleteStudent(req, res) {
   }
 }
 
-async function getStudent(req, res) {
+const getStudent = async (req, res) => {
   try {
-    let studentId = req.params.id;
-    let student = await Student.findOne({ _id: studentId });
-    res.status(200).send({ success: true, data: student });
-  } catch (error) {
-    res
-      .status(500)
-      .send({ success: false, message: "Something went wrong..." });
-  }
-}
+    const { id } = req.params;
 
+    const student = await Student.findOne({ _id: id })
+      .populate("course", "courseShortName")
+      .populate("branch", "branchShortName")
+      .lean();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: student,
+    });
+  } catch (error) {
+    console.error("Get Student Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 async function editStudent(req, res) {
   try {
     let studentId = req.params.id;
@@ -878,6 +930,142 @@ const bulkUploadStudents = async (req, res) => {
   }
 };
 
+const exportFieldLabels = {
+  firstName: "First Name",
+  lastName: "Last Name",
+  dob: "Date of Birth",
+  gender: "Gender",
+  category: "Category",
+  fatherName: "Father's Name",
+  motherName: "Mother's Name",
+
+  personalEmailId: "Personal Email",
+  collegeEmailId: "College Email",
+  mobileNumber: "Mobile Number",
+  emergencyMobNumber: "Emergency Number",
+
+  enrollmentNumber: "Enrollment Number",
+  fileNumber: "File Number",
+  rollNumber: "Roll Number",
+
+  "course.courseShortName": "Course",
+  "branch.branchShortName": "Branch",
+
+  section: "Section",
+  admissionYear: "Admission Year",
+  currentSession: "Current Session",
+  year: "Year",
+  semester: "Semester",
+  status: "Status",
+
+  localAddressLine1: "Local Address Line 1",
+  localAddressLine2: "Local Address Line 2",
+  localCity: "Local City",
+  localState: "Local State",
+  localPincode: "Local Pincode",
+
+  permanentAddressLine1: "Permanent Address Line 1",
+  permanentAddressLine2: "Permanent Address Line 2",
+  permanentcity: "Permanent City",
+  permanentState: "Permanent State",
+  permanentPincode: "Permanent Pincode",
+};
+
+async function exportStudents(req, res) {
+  let cursor;
+
+  try {
+    // Separate selected fields from filter parameters
+    const { fields, ...filterQuery } = req.query;
+
+    // Validate filters using your existing function
+    const filter = buildStudentFilter(filterQuery);
+
+    // Get selected fields
+    const selectedFields =
+      typeof fields === "string" ? fields.split(",").filter(Boolean) : [];
+
+    if (!selectedFields.length) {
+      return res.status(400).send("Select at least one field.");
+    }
+
+    // Validate against allowed fields
+    const invalidFields = selectedFields.filter(
+      (field) => !Object.hasOwn(exportFieldLabels, field),
+    );
+
+    if (invalidFields.length) {
+      return res.status(400).send("Invalid export fields.");
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="students_${date}.csv"`,
+    );
+
+    // UTF-8 BOM for Excel compatibility
+    res.write("\uFEFF");
+
+    // Create CSV with dynamically selected headers
+    const csv = format({
+      headers: selectedFields.map((field) => exportFieldLabels[field]),
+    });
+
+    csv.pipe(res);
+
+    // MongoDB cursor with populated course and branch
+    cursor = Student.find(filter)
+      .populate("course", "courseShortName")
+      .populate("branch", "branchShortName")
+      .sort({ firstName: 1, lastName: 1 })
+      .lean()
+      .cursor();
+
+    // Helper to get nested properties
+    const getValue = (obj, path) => {
+      return path.split(".").reduce((current, key) => current?.[key], obj);
+    };
+
+    // Stream students one by one
+    for await (const student of cursor) {
+      const row = selectedFields.map((field) => {
+        let value = getValue(student, field);
+
+        if (value instanceof Date) {
+          value = value.toLocaleDateString("en-IN");
+        }
+
+        // Protect spreadsheet users from formula injection
+        if (typeof value === "string" && /^[\t\r ]*[=+\-@]/.test(value)) {
+          value = "'" + value;
+        }
+
+        return value ?? "";
+      });
+
+      csv.write(row);
+    }
+
+    csv.end();
+  } catch (error) {
+    console.error("Student CSV Export Error:", error);
+
+    if (cursor) {
+      await cursor.close().catch(() => {});
+    }
+
+    if (!res.headersSent) {
+      return res.status(500).send("Export failed");
+    }
+
+    res.destroy(error);
+  }
+}
+
 module.exports = {
   getCourseForStudent,
   getBranchForStudent,
@@ -887,4 +1075,5 @@ module.exports = {
   getStudent,
   editStudent,
   bulkUploadStudents,
+  exportStudents,
 };

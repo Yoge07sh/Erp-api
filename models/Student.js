@@ -45,12 +45,12 @@ const studentSchema = new mongoose.Schema(
     // Below three attributes are used in modal for uploading students through CSV files.
     course: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Course",
+      ref: "course",
       required: true,
     },
     branch: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Branch",
+      ref: "branch",
       required: false,
       default: null,
     },
