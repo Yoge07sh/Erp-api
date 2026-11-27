@@ -49,4 +49,7 @@ router.get("/students/export", authMiddleware, (req, res) =>
   StudentController.exportStudents(req, res),
 );
 
+router.post("/students/promote", authMiddleware, (req, res) =>
+  StudentController.promoteStudents(req, res),
+);
 module.exports = router;

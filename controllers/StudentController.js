@@ -3,6 +3,7 @@ const Branch = require("../models/Branch");
 const Course = require("../models/Course");
 const Student = require("../models/Student");
 const User = require("../models/User");
+const StudentAcademicReport = require("../models/StudentAcademicReport");
 const cloudinary = require("cloudinary").v2;
 const { randomUUID } = require("crypto");
 const { format } = require("@fast-csv/format");
@@ -1066,6 +1067,181 @@ async function exportStudents(req, res) {
   }
 }
 
+async function promoteStudents(req, res) {
+  const {
+    selectionMode,
+    selectedStudents = [],
+    filters = {},
+    excludedStudents = [],
+    fromDetails,
+    toDetails,
+    requestId,
+  } = req.body;
+
+  if (
+    !["individual", "all"].includes(selectionMode) ||
+    !fromDetails ||
+    !toDetails ||
+    !requestId
+  ) {
+    return res.status(400).json({
+      message: "Invalid promotion request",
+    });
+  }
+
+  const {
+    session: fromSession,
+    year: fromYear,
+    semester: fromSemester,
+    status: fromStatus,
+  } = fromDetails;
+  const {
+    session: toSession,
+    year: toYear,
+    semester: toSemester,
+    status: toStatus,
+  } = toDetails;
+
+  if (
+    !fromSession ||
+    !fromYear ||
+    !fromSemester ||
+    !fromStatus ||
+    !toSession ||
+    !toYear ||
+    !toSemester ||
+    !toStatus
+  ) {
+    return res.status(400).json({
+      message: "Complete FROM and TO details are required",
+    });
+  }
+
+  if (
+    !["Pursuing", "Passed", "Failed", "Left"].includes(fromStatus) ||
+    !["Pursuing", "Passed", "Failed", "Left"].includes(toStatus)
+  ) {
+    return res.status(400).json({
+      message: "Invalid academic status",
+    });
+  }
+  if (
+    typeof requestId !== "string" ||
+    requestId.trim().length < 10 ||
+    requestId.length > 100
+  ) {
+    return res.status(400).json({
+      message: "Invalid promotion request ID",
+    });
+  }
+
+  const mongoSession = await mongoose.startSession();
+
+  try {
+    await mongoSession.withTransaction(async () => {
+      let studentFilter = {};
+
+      if (selectionMode === "individual") {
+        if (!selectedStudents.length) {
+          throw new Error("Please select at least one student");
+        }
+
+        studentFilter = {
+          _id: { $in: selectedStudents },
+        };
+      } else {
+        studentFilter = buildStudentFilter(filters);
+
+        if (excludedStudents.length) {
+          studentFilter._id = {
+            ...(studentFilter._id || {}),
+            $nin: excludedStudents,
+          };
+        }
+      }
+
+      const students = await Student.find(studentFilter).session(mongoSession);
+
+      if (!students.length) {
+        throw new Error("No students found for promotion");
+      }
+      // Check whether this request was already processed for all students.
+      const existingReports = await StudentAcademicReport.find({
+        studentId: { $in: students.map((student) => student._id) },
+        "academicHistory.promotionId": requestId,
+      }).session(mongoSession);
+
+      if (existingReports.length === students.length) {
+        return;
+      }
+
+      if (existingReports.length > 0) {
+        throw new Error(
+          "This promotion request was only partially processed. Please contact the administrator.",
+        );
+      }
+
+      // Validate FROM academic position.
+      const invalidStudent = students.find(
+        (student) =>
+          student.currentSession !== fromSession ||
+          Number(student.year) !== Number(fromYear) ||
+          Number(student.semester) !== Number(fromSemester),
+      );
+
+      if (invalidStudent) {
+        throw new Error(
+          "Some selected students do not match the FROM session, year, and semester",
+        );
+      }
+
+      for (const student of students) {
+        let report = await StudentAcademicReport.findOne({
+          studentId: student._id,
+        }).session(mongoSession);
+
+        if (!report) {
+          report = new StudentAcademicReport({
+            studentId: student._id,
+            academicHistory: [],
+            overallStatus: "Active",
+          });
+        }
+
+        report.academicHistory.push({
+          promotionId: requestId,
+          session: fromSession,
+          year: Number(fromYear),
+          semester: Number(fromSemester),
+          status: fromStatus,
+        });
+
+        report.overallStatus = toStatus;
+
+        await report.save({ session: mongoSession });
+
+        student.currentSession = toSession;
+        student.year = String(toYear);
+        student.semester = String(toSemester);
+
+        await student.save({ session: mongoSession });
+      }
+    });
+
+    return res.status(200).json({
+      message: "Students promoted successfully",
+    });
+  } catch (error) {
+    console.error("Promote students error:", error);
+
+    return res.status(400).json({
+      message: error.message || "Student promotion failed",
+    });
+  } finally {
+    await mongoSession.endSession();
+  }
+}
+
 module.exports = {
   getCourseForStudent,
   getBranchForStudent,
@@ -1076,4 +1252,5 @@ module.exports = {
   editStudent,
   bulkUploadStudents,
   exportStudents,
+  promoteStudents
 };
